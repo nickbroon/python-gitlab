@@ -11,7 +11,7 @@ import gitlab
 import gitlab.base
 
 SLEEP_INTERVAL = 0.5
-TIMEOUT = 60  # seconds before timeout will occur
+TIMEOUT = 3 * 60  # seconds before timeout will occur
 
 
 @pytest.fixture(scope="session")
@@ -21,6 +21,17 @@ def fixture_dir(test_dir):
 
 def reset_gitlab(gl):
     # previously tools/reset_gitlab.py
+    if is_gitlab_ee(gl):
+        logging.info("GitLab EE detected")
+        # NOTE(jlvillal): By default in GitLab EE it will wait 7 days before
+        # deleting a group. Change it to 0 days.
+        settings = gl.settings.get()
+        logging.info(f"deletion_adjourned_period: {settings.deletion_adjourned_period}")
+        if settings.deletion_adjourned_period != 0:
+            logging.info("Setting deletion_adjourned_period to 0")
+            settings.deletion_adjourned_period = 0
+            settings.save()
+
     for project in gl.projects.list():
         logging.info(f"Marking for deletion project: {project.path_with_namespace!r}")
         for deploy_token in project.deploytokens.list():
@@ -65,9 +76,11 @@ def reset_gitlab(gl):
             if len(items) <= max_length:
                 break
             logging.info(
-                f"Iteration: {count} Waiting for {description!r} items to be deleted: "
-                f"{[x.name for x in items]}"
+                f"Iteration: {count} of {max_iterations}: Waiting for {description!r} "
+                f"items to be deleted: {[x.name for x in items]}"
             )
+            for item in items:
+                logging.info(f"JLV: {item} {item.name} {item.pformat()}")
             time.sleep(SLEEP_INTERVAL)
 
         elapsed_time = time.perf_counter() - start_time
@@ -236,6 +249,18 @@ def gl(gitlab_config):
     reset_gitlab(instance)
 
     return instance
+
+
+def is_gitlab_ee(gl: gitlab.Gitlab) -> bool:
+    """Determine if we are running with GitLab EE as opposed to GitLab CE"""
+    try:
+        license = gl.get_license()
+    except gitlab.exceptions.GitlabLicenseError:
+        license = None
+    # If we have a license then we assume we are running on GitLab EE
+    if license:
+        return True
+    return False
 
 
 @pytest.fixture(scope="session")
