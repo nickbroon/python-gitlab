@@ -9,9 +9,7 @@ import pytest
 
 import gitlab
 import gitlab.base
-
-SLEEP_INTERVAL = 0.5
-TIMEOUT = 60  # seconds before timeout will occur
+from tests.functional import helpers
 
 
 @pytest.fixture(scope="session")
@@ -49,7 +47,7 @@ def reset_gitlab(gl):
             logging.info(f"Marking for deletion user: {user.username!r}")
             user.delete(hard_delete=True)
 
-    max_iterations = int(TIMEOUT / SLEEP_INTERVAL)
+    max_iterations = int(helpers.TIMEOUT / helpers.SLEEP_INTERVAL)
 
     # Ensure everything has been reset
     start_time = time.perf_counter()
@@ -68,7 +66,7 @@ def reset_gitlab(gl):
                 f"Iteration: {count} Waiting for {description!r} items to be deleted: "
                 f"{[x.name for x in items]}"
             )
-            time.sleep(SLEEP_INTERVAL)
+            time.sleep(helpers.SLEEP_INTERVAL)
 
         elapsed_time = time.perf_counter() - start_time
         error_message = (
@@ -277,13 +275,11 @@ def group(gl):
         "path": f"group-{_id}",
     }
     group = gl.groups.create(data)
+    group_id = group.id
 
     yield group
 
-    try:
-        group.delete()
-    except gitlab.exceptions.GitlabDeleteError as e:
-        print(f"Group already deleted: {e}")
+    helpers.safe_delete(manager=gl.groups, object_id=group_id, description="Group")
 
 
 @pytest.fixture(scope="module")
@@ -296,10 +292,9 @@ def project(gl):
 
     yield project
 
-    try:
-        project.delete()
-    except gitlab.exceptions.GitlabDeleteError as e:
-        print(f"Project already deleted: {e}")
+    helpers.safe_delete(
+        manager=gl.projects, object_id=project.id, description="Project"
+    )
 
 
 @pytest.fixture(scope="function")
@@ -365,12 +360,16 @@ def merge_request(project, wait_for_sidekiq):
     yield _merge_request
 
     for mr_iid, source_branch in to_delete:
-        project.mergerequests.delete(mr_iid)
-        try:
-            project.branches.delete(source_branch)
-        except gitlab.exceptions.GitlabDeleteError:
-            # Ignore if branch was already deleted
-            pass
+        helpers.safe_delete(
+            manager=project.mergerequests,
+            object_id=mr_iid,
+            description="Project mergerequest",
+        )
+        helpers.safe_delete(
+            manager=project.branches,
+            object_id=source_branch,
+            description="Project branch",
+        )
 
 
 @pytest.fixture(scope="module")
@@ -431,14 +430,14 @@ def user(gl):
     password = "fakepassword"
 
     user = gl.users.create(email=email, username=username, name=name, password=password)
+    user_id = user.id
 
     yield user
 
-    try:
-        # Use `hard_delete=True` or a 'Ghost User' may be created.
-        user.delete(hard_delete=True)
-    except gitlab.exceptions.GitlabDeleteError as e:
-        print(f"User already deleted: {e}")
+    # Use `hard_delete=True` or a 'Ghost User' may be created.
+    helpers.safe_delete(
+        manager=gl.users, object_id=user_id, description="User", hard_delete=True
+    )
 
 
 @pytest.fixture(scope="module")
