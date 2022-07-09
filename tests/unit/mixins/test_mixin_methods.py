@@ -45,7 +45,45 @@ def test_get_mixin(gl):
     assert isinstance(obj, FakeObject)
     assert obj.foo == "bar"
     assert obj.id == 42
+    assert obj._lazy is False
     assert responses.assert_call_count(url, 1) is True
+
+
+def test_get_mixin_lazy(gl):
+    class M(GetMixin, FakeManager):
+        pass
+
+    url = "http://localhost/api/v4/tests/42"
+
+    mgr = M(gl)
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(
+            method=responses.GET,
+            url=url,
+            json={"id": 42, "foo": "bar"},
+            status=200,
+            match=[responses.matchers.query_param_matcher({})],
+        )
+        obj = mgr.get(42, lazy=True)
+    assert isinstance(obj, FakeObject)
+    assert not hasattr(obj, "foo")
+    assert obj.id == 42
+    assert obj._lazy is True
+    # a `lazy` get does not make a network request
+    assert len(rsps.calls) == 0
+
+
+def test_get_mixin_lazy_missing_attribute(gl):
+    class FakeGetManager(GetMixin, FakeManager):
+        pass
+
+    manager = FakeGetManager(gl)
+    obj = manager.get(1, lazy=True)
+    assert obj.id == 1
+    with pytest.raises(AttributeError) as exc:
+        obj.missing_attribute
+    assert "as a `lazy` object" in str(exc)
+    assert "'missing_attribute'" in str(exc)
 
 
 @responses.activate
